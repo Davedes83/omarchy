@@ -34,6 +34,83 @@ pass "Claude collector keeps mutually exclusive token categories"
   fail "Claude collector identifies itself and reports missing auth" "$result"
 pass "Claude collector identifies itself and reports missing auth"
 
+# Transcripts only ever grow, so a refresh reads what was appended since the
+# last one and takes the rest from the scan index.
+cat >>"$projects/session.jsonl" <<EOF
+{"timestamp":"$timestamp","type":"assistant","sessionId":"session-1","uuid":"event-4","message":{"id":"message-3","role":"assistant","model":"claude-test","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":200,"output_tokens":6}}}
+EOF
+
+result=$(HOME="$TEST_HOME" XDG_CACHE_HOME="$TEST_HOME/.cache" XDG_DATA_HOME="$TEST_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0)
+
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "59000" ]] ||
+  fail "Claude collector picks up lines appended since the last scan" "$result"
+pass "Claude collector picks up lines appended since the last scan"
+
+index=$(ls "$TEST_HOME"/.cache/omarchy/agent-usage/claude-index-*.json 2>/dev/null | head -1)
+[[ -n $index && $(jq -r '.files | to_entries[0].value.records | length' "$index") == "3" ]] ||
+  fail "Claude collector keeps one record per API message in the scan index" "$(cat "$index" 2>/dev/null)"
+pass "Claude collector keeps one record per API message in the scan index"
+
+# An unchanged file is not opened again: its records come from the index.
+chmod 000 "$projects/session.jsonl"
+result=$(HOME="$TEST_HOME" XDG_CACHE_HOME="$TEST_HOME/.cache" XDG_DATA_HOME="$TEST_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0 2>/dev/null)
+chmod 644 "$projects/session.jsonl"
+
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "59000" ]] ||
+  fail "Claude collector serves unchanged transcripts from the scan index" "$result"
+pass "Claude collector serves unchanged transcripts from the scan index"
+
+# A file that shrank was rewritten, not appended to; it is read from the start.
+head -n 1 "$projects/session.jsonl" >"$projects/session.jsonl.new"
+mv "$projects/session.jsonl.new" "$projects/session.jsonl"
+result=$(HOME="$TEST_HOME" XDG_CACHE_HOME="$TEST_HOME/.cache" XDG_DATA_HOME="$TEST_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0)
+
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "29090" ]] ||
+  fail "Claude collector rescans a transcript that was rewritten" "$result"
+pass "Claude collector rescans a transcript that was rewritten"
+
+# A transcript replaced by a larger one, or rewritten in place with more than
+# it had, is a new file rather than an append: nothing of the old one stays,
+# and the new one is read from its start.
+INDEX_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$INDEX_HOME"' EXIT
+index_projects="$INDEX_HOME/.claude/projects/example"
+mkdir -p "$index_projects"
+index_line() {
+  printf '{"timestamp":"%s","type":"assistant","sessionId":"s","message":{"id":"%s","role":"assistant","model":"claude-test","usage":{"input_tokens":%s,"output_tokens":0}}}\n' "$timestamp" "$1" "$2"
+}
+index_scan() {
+  HOME="$INDEX_HOME" XDG_CACHE_HOME="$INDEX_HOME/.cache" XDG_DATA_HOME="$INDEX_HOME/.local/share" \
+    "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0 "$@"
+}
+
+index_line old-1 1000 >"$index_projects/session.jsonl"
+index_scan >/dev/null
+{ index_line new-1 20; index_line new-2 30; } >"$index_projects/session.jsonl.new"
+mv "$index_projects/session.jsonl.new" "$index_projects/session.jsonl"
+[[ $(index_scan | jq -c '[.todayTotalTokens, .totalPrompts]') == '[50,2]' ]] ||
+  fail "Claude collector reads a transcript replaced by a larger one from its start" "$(index_scan)"
+
+{ index_line other-1 7; index_line other-2 8; index_line other-3 9; } >"$index_projects/session.jsonl"
+[[ $(index_scan | jq -c '[.todayTotalTokens, .totalPrompts]') == '[24,3]' ]] ||
+  fail "Claude collector reads a transcript rewritten in place from its start" "$(index_scan)"
+pass "Claude collector rereads a transcript that was replaced or rewritten"
+
+# The index holds local days, so a new timezone reads every transcript again
+# rather than keep the days another timezone gave them.
+zone_timestamp="$(date -u +%Y-%m-%d)T01:00:00Z"
+printf '{"timestamp":"%s","type":"assistant","sessionId":"s","message":{"id":"zone-1","role":"assistant","model":"claude-test","usage":{"input_tokens":5,"output_tokens":0}}}\n' "$zone_timestamp" >"$index_projects/session.jsonl"
+TZ=UTC index_scan >/dev/null
+zone_dates=$(TZ=America/Los_Angeles index_scan | jq -r '.activeDates | join(",")')
+[[ $zone_dates == "$(TZ=America/Los_Angeles date -d "$zone_timestamp" +%Y-%m-%d)" ]] ||
+  fail "Claude collector recomputes indexed days after a timezone change" "$zone_dates"
+pass "Claude collector recomputes indexed days after a timezone change"
+rm -rf "$INDEX_HOME"
+trap 'rm -rf "$TEST_HOME"' EXIT
+
 # A streamed response is several lines sharing one message id. The first
 # line's output_tokens is a placeholder and the last line has the real count,
 # so the message is counted from the line with the highest output.
@@ -64,6 +141,19 @@ pass "Claude collector counts a streamed message from its final usage line"
 [[ $(jq -r '.totalPrompts' <<<"$result") == "2" ]] ||
   fail "Claude collector keeps the final line whole after a mid-stream fallback" "$result"
 pass "Claude collector keeps the final line whole after a mid-stream fallback"
+
+# A stream still being written when the index was taken finishes in lines
+# appended later; the indexed message takes the higher count from them.
+result=$(HOME="$STREAM_HOME" XDG_CACHE_HOME="$STREAM_HOME/.cache" XDG_DATA_HOME="$STREAM_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0)
+cat >>"$stream_projects/session.jsonl" <<EOF
+{"timestamp":"$timestamp","type":"assistant","sessionId":"session-1","uuid":"event-6","message":{"id":"message-2","role":"assistant","model":"claude-fallback","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":3500,"output_tokens":90}}}
+EOF
+result=$(HOME="$STREAM_HOME" XDG_CACHE_HOME="$STREAM_HOME/.cache" XDG_DATA_HOME="$STREAM_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --cache-seconds 0)
+[[ $(jq -c '[.modelUsage["claude-fallback"].outputTokens, .totalPrompts]' <<<"$result") == '[90,2]' ]] ||
+  fail "Claude collector takes a streamed message's final count from appended lines" "$result"
+pass "Claude collector takes a streamed message's final count from appended lines"
 
 # A machine with no transcripts and no stats-cache still gets today's counts
 # from history.jsonl alone.
