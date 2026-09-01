@@ -88,7 +88,8 @@ pass "Codex collector identifies itself with an empty limits list"
 # Codex sessions. Their compatible JSONL transcripts must be included.
 PI_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME"' EXIT
-mkdir -p "$PI_HOME/bin" "$PI_HOME/.pi/agent/sessions/project" "$PI_HOME/.omp/agent/sessions/project"
+mkdir -p "$PI_HOME/bin" "$PI_HOME/.pi/agent/sessions/project" "$PI_HOME/.omp/agent/sessions/project" \
+  "$PI_HOME/.omp/profiles/codex/agent/sessions/project"
 mkdir -p "$PI_HOME/.codex" && touch "$PI_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$PI_HOME/bin/codex"
 real_rg=$(command -v rg)
@@ -112,19 +113,24 @@ cat >"$PI_HOME/.omp/agent/sessions/project/omp.jsonl" <<EOF
 { "type": "message", "id": "omp-1", "timestamp": "$timestamp", "message": { "role": "assistant", "provider": "openai-codex", "model": "gpt-omp", "usage": { "input": 20, "output": 5, "cacheRead": 4, "cacheWrite": 1, "totalTokens": 30 } } }
 {"type":"message","id":"other-1","timestamp":"$timestamp","message":{"role":"assistant","provider":"anthropic","model":"claude-test","usage":{"input":999,"output":999}}}
 EOF
+# `omp --profile=<name>` moves the whole agent tree under profiles/<name>/, so a
+# subscription spent entirely through a profile leaves the default root empty.
+cat >"$PI_HOME/.omp/profiles/codex/agent/sessions/project/omp-profile.jsonl" <<EOF
+{"type":"message","id":"omp-profile-1","timestamp":"$timestamp","message":{"role":"assistant","provider":"openai-codex","model":"gpt-omp-profile","usage":{"input":7,"output":3,"cacheRead":2,"cacheWrite":1,"totalTokens":13}}}
+EOF
 
 result=$(HOME="$PI_HOME" CODEX_HOME="$PI_HOME/.codex" XDG_DATA_HOME="$PI_HOME/.local/share" \
   PATH="$PI_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex")
 
-[[ $(jq -r '.todayTotalTokens' <<<"$result") == "64" ]] ||
-  fail "Codex collector counts Pi fork and OMP usage once" "$result"
-[[ $(jq -c '.modelUsage' <<<"$result") == '{"gpt-pi":{"inputTokens":24,"outputTokens":5,"cacheReadInputTokens":3,"cacheCreationInputTokens":2},"gpt-omp":{"inputTokens":20,"outputTokens":5,"cacheReadInputTokens":4,"cacheCreationInputTokens":1}}' ]] ||
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "77" ]] ||
+  fail "Codex collector counts Pi fork, OMP, and profile usage once" "$result"
+[[ $(jq -c '.modelUsage' <<<"$result") == '{"gpt-pi":{"inputTokens":24,"outputTokens":5,"cacheReadInputTokens":3,"cacheCreationInputTokens":2},"gpt-omp":{"inputTokens":20,"outputTokens":5,"cacheReadInputTokens":4,"cacheCreationInputTokens":1},"gpt-omp-profile":{"inputTokens":7,"outputTokens":3,"cacheReadInputTokens":2,"cacheCreationInputTokens":1}}' ]] ||
   fail "Codex collector filters pi and omp sessions to Codex providers" "$result"
-[[ $(jq -r '.todayPrompts' <<<"$result") == "4" ]] ||
+[[ $(jq -r '.todayPrompts' <<<"$result") == "5" ]] ||
   fail "Codex collector keeps distinct Pi messages with colliding IDs" "$result"
-[[ $(jq -c '[.todaySessions,.totalSessions]' <<<"$result") == '[4,4]' ]] ||
+[[ $(jq -c '[.todaySessions,.totalSessions]' <<<"$result") == '[5,5]' ]] ||
   fail "Codex collector attributes new fork usage to its own session" "$result"
-pass "Codex collector deduplicates Pi forks without collapsing ID collisions"
+pass "Codex collector deduplicates Pi forks without collapsing ID collisions, profiles included"
 
 # A $HOME that is itself a git checkout (a common dotfiles setup with a
 # whitelist .gitignore) must not hide the session files from the scan:
