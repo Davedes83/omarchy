@@ -212,6 +212,7 @@ for line in sys.stdin:
   print(json.dumps({"id": message["id"], "result": result}), flush=True)
 PY
 chmod +x "$test_tmp/bin/codex"
+touch "$HOME/.codex/auth.json" "$accounts/codex/side/auth.json"
 
 cat >"$accounts/codex.json" <<JSON
 {
@@ -233,3 +234,12 @@ inherited=$(CODEX_HOME="$accounts/codex/side" PATH="$test_tmp/bin:$PATH" "$ROOT/
 [[ $(jq -c '[.accounts[] | .limits[0].percent]' <<<"$inherited") == '[0.4,0.91]' ]] ||
   fail "Main's Codex limits come from ~/.codex whatever CODEX_HOME says" "$inherited"
 pass "Main's Codex limits come from ~/.codex whatever CODEX_HOME says"
+
+# A secondary home nobody signed in to is waiting for auth, even while
+# ~/.codex holds a login, and its app-server is never started.
+rm "$accounts/codex/side/auth.json"
+signed_out=$(PATH="$test_tmp/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --force)
+[[ $(jq -c '[.accounts[] | {id, used: .limits[0].percent, status: .usageStatusText}]' <<<"$signed_out") == '[{"id":"main","used":0.4,"status":""},{"id":"side","used":null,"status":"Waiting for auth"}]' ]] ||
+  fail "a signed-out Codex home waits for auth on its own" "$signed_out"
+touch "$accounts/codex/side/auth.json"
+pass "a signed-out Codex home waits for auth on its own"

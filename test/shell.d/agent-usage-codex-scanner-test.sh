@@ -9,6 +9,7 @@ TEST_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME"' EXIT
 
 mkdir -p "$TEST_HOME/.codex/sessions/$(date +%Y/%m/%d)" "$TEST_HOME/bin"
+touch "$TEST_HOME/.codex/auth.json"
 
 cat >"$TEST_HOME/bin/codex" <<'EOF'
 #!/bin/bash
@@ -80,6 +81,7 @@ pass "Codex collector identifies itself with an empty limits list"
 PI_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME"' EXIT
 mkdir -p "$PI_HOME/bin" "$PI_HOME/.pi/agent/sessions/project" "$PI_HOME/.omp/agent/sessions/project"
+mkdir -p "$PI_HOME/.codex" && touch "$PI_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$PI_HOME/bin/codex"
 cat >"$PI_HOME/.pi/agent/sessions/project/pi.jsonl" <<EOF
 {"type":"message","id":"pi-1","timestamp":"$timestamp","message":{"role":"assistant","provider":"openai-codex","api":"openai-codex-responses","model":"gpt-pi","usage":{"input":10,"output":4,"cacheRead":3,"cacheWrite":2,"totalTokens":19}}}
@@ -103,6 +105,7 @@ pass "Codex collector counts pi and omp subscription usage"
 OPENCODE_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME"' EXIT
 mkdir -p "$OPENCODE_HOME/bin"
+mkdir -p "$OPENCODE_HOME/.codex" && touch "$OPENCODE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$OPENCODE_HOME/bin/codex"
 
 python3 - "$OPENCODE_HOME/.local/share/opencode/opencode.db" <<'PY'
@@ -154,6 +157,7 @@ pass "Codex collector ignores prefix-colliding providers, user messages, and mal
 CACHE_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME"' EXIT
 mkdir -p "$CACHE_HOME/bin"
+mkdir -p "$CACHE_HOME/.codex" && touch "$CACHE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$CACHE_HOME/bin/codex"
 
 python3 - "$CACHE_HOME/.local/share/opencode/opencode.db" <<'PY'
@@ -418,6 +422,7 @@ pass "Codex collector treats a future-dated cache as a miss"
 FRESH_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME"' EXIT
 mkdir -p "$FRESH_HOME/bin"
+mkdir -p "$FRESH_HOME/.codex" && touch "$FRESH_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$FRESH_HOME/bin/codex"
 
 python3 - "$FRESH_HOME/.local/share/opencode/opencode.db" <<'PY'
@@ -458,6 +463,7 @@ pass "Codex collector --limits-only falls back to a full scan without a cache"
 MALFORMED_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME"' EXIT
 mkdir -p "$MALFORMED_HOME/bin"
+mkdir -p "$MALFORMED_HOME/.codex" && touch "$MALFORMED_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$MALFORMED_HOME/bin/codex"
 
 python3 - "$MALFORMED_HOME/.local/share/opencode/opencode.db" <<'PY'
@@ -512,6 +518,7 @@ pass "Codex collector counts good opencode rows past malformed ones"
 UNWRITABLE_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME"' EXIT
 mkdir -p "$UNWRITABLE_HOME/bin"
+mkdir -p "$UNWRITABLE_HOME/.codex" && touch "$UNWRITABLE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$UNWRITABLE_HOME/bin/codex"
 
 python3 - "$UNWRITABLE_HOME/.local/share/opencode/opencode.db" <<'PY'
@@ -554,6 +561,7 @@ pass "Codex collector still prints a complete record when the cache is unwritabl
 INTERRUPTED_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME"' EXIT
 mkdir -p "$INTERRUPTED_HOME/bin"
+mkdir -p "$INTERRUPTED_HOME/.codex" && touch "$INTERRUPTED_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$INTERRUPTED_HOME/bin/codex"
 
 # A database without the message table makes the scan fail mid-flight.
@@ -647,6 +655,7 @@ pass "Codex collector reports a missing sign-in as one"
 BATCHED_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME"' EXIT
 mkdir -p "$BATCHED_HOME/bin"
+mkdir -p "$BATCHED_HOME/.codex" && touch "$BATCHED_HOME/.codex/auth.json"
 cat >"$BATCHED_HOME/bin/codex" <<'EOF'
 #!/bin/bash
 
@@ -692,7 +701,8 @@ for tool in python3 rg; do
   fi
 done
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME"' EXIT
-mkdir -p "$LAUNCH_HOME/bin" "$LAUNCH_HOME/.local/bin"
+mkdir -p "$LAUNCH_HOME/bin" "$LAUNCH_HOME/.local/bin" "$LAUNCH_HOME/.codex"
+touch "$LAUNCH_HOME/.codex/auth.json"
 cat >"$LAUNCH_HOME/.local/bin/codex" <<'LAUNCHER'
 #!/bin/bash
 export MISE_MINIMUM_RELEASE_AGE=0
@@ -739,7 +749,8 @@ pass "Codex collector probes the mise-resolved binary"
 # directly without asking mise at all.
 LINK_HOME=$(mktemp -d)
 trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME"' EXIT
-mkdir -p "$LINK_HOME/bin" "$LINK_HOME/.local/bin"
+mkdir -p "$LINK_HOME/bin" "$LINK_HOME/.local/bin" "$LINK_HOME/.codex"
+touch "$LINK_HOME/.codex/auth.json"
 ln -s "$TEST_HOME/bin/codex" "$LINK_HOME/.local/bin/codex"
 cat >"$LINK_HOME/bin/mise" <<STUB
 #!/bin/bash
@@ -777,3 +788,75 @@ result=$(HOME="$SHIM_HOME" CODEX_HOME="$SHIM_HOME/.codex" MISE_CALLS_FILE="$SHIM
 [[ ! -s $SHIM_HOME/mise-calls || $(cat "$SHIM_HOME/mise-calls") == "which codex" ]] ||
   fail "Codex collector must not execute a mise shim" "$(cat "$SHIM_HOME/mise-calls" 2>/dev/null)"
 pass "Codex collector treats a shim symlink to mise as lazy"
+
+# Without Codex credentials, account/read can only fail — and starting the
+# app-server is not free: it syncs the plugin list, a git fetch per refresh
+# that leaves ~/.codex/.tmp/git-* folders behind. The collector must not
+# spawn codex at all.
+NOAUTH_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME"' EXIT
+mkdir -p "$NOAUTH_HOME/bin"
+cp "$TEST_HOME/bin/codex" "$NOAUTH_HOME/bin/codex"
+
+result=$(HOME="$NOAUTH_HOME" CODEX_HOME="$NOAUTH_HOME/.codex" CODEX_ARGS_FILE="$NOAUTH_HOME/codex-args" XDG_DATA_HOME="$NOAUTH_HOME/.local/share" \
+  PATH="$NOAUTH_HOME/bin:$PATH" env -u OPENAI_API_KEY -u CODEX_API_KEY -u CODEX_ACCESS_TOKEN "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ ! -e $NOAUTH_HOME/codex-args ]] ||
+  fail "Codex collector does not spawn app-server without credentials" "$result"
+[[ $(jq -r '.usageStatusText' <<<"$result") == "Waiting for auth" ]] ||
+  fail "Codex collector waits for auth without credentials" "$result"
+pass "Codex collector does not spawn app-server without credentials"
+
+# A non-file credentials store keeps credentials outside auth.json, so the
+# probe must still run.
+KEYRING_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME"' EXIT
+mkdir -p "$KEYRING_HOME/bin" "$KEYRING_HOME/.codex"
+cp "$TEST_HOME/bin/codex" "$KEYRING_HOME/bin/codex"
+printf 'cli_auth_credentials_store = "keyring"\n' >"$KEYRING_HOME/.codex/config.toml"
+
+result=$(HOME="$KEYRING_HOME" CODEX_HOME="$KEYRING_HOME/.codex" CODEX_ARGS_FILE="$KEYRING_HOME/codex-args" XDG_DATA_HOME="$KEYRING_HOME/.local/share" \
+  PATH="$KEYRING_HOME/bin:$PATH" env -u OPENAI_API_KEY -u CODEX_API_KEY -u CODEX_ACCESS_TOKEN "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ -e $KEYRING_HOME/codex-args ]] ||
+  fail "Codex collector probes the app-server when the keyring store is configured" "$result"
+pass "Codex collector probes the app-server when the keyring store is configured"
+
+# The setting is TOML, so a single-quoted value names the keyring just as well,
+# while an explicit file store with no auth.json is still signed out.
+for store in "'keyring'" '"file"'; do
+  rm -f "$KEYRING_HOME/codex-args"
+  printf 'model = "gpt-5"\ncli_auth_credentials_store = %s\n' "$store" >"$KEYRING_HOME/.codex/config.toml"
+  HOME="$KEYRING_HOME" CODEX_HOME="$KEYRING_HOME/.codex" CODEX_ARGS_FILE="$KEYRING_HOME/codex-args" XDG_DATA_HOME="$KEYRING_HOME/.local/share" \
+    PATH="$KEYRING_HOME/bin:$PATH" env -u OPENAI_API_KEY -u CODEX_API_KEY -u CODEX_ACCESS_TOKEN "$ROOT/bin/omarchy-agent-usage-codex" --limits-only >/dev/null
+  if [[ $store == "'keyring'" ]]; then
+    [[ -e $KEYRING_HOME/codex-args ]] || fail "Codex collector reads a single-quoted keyring store as TOML"
+  else
+    [[ ! -e $KEYRING_HOME/codex-args ]] || fail "Codex collector does not probe an empty file store"
+  fi
+done
+pass "Codex collector reads the credentials store as TOML"
+
+# A CODEX_ACCESS_TOKEN is credentials even without auth.json.
+TOKEN_HOME=$(mktemp -d)
+mkdir -p "$TOKEN_HOME/bin" "$TOKEN_HOME/.codex"
+cp "$TEST_HOME/bin/codex" "$TOKEN_HOME/bin/codex"
+
+result=$(HOME="$TOKEN_HOME" CODEX_HOME="$TOKEN_HOME/.codex" CODEX_ARGS_FILE="$TOKEN_HOME/codex-args" XDG_DATA_HOME="$TOKEN_HOME/.local/share" \
+  PATH="$TOKEN_HOME/bin:$PATH" env -u OPENAI_API_KEY -u CODEX_API_KEY CODEX_ACCESS_TOKEN=x "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ -e $TOKEN_HOME/codex-args ]] ||
+  fail "Codex collector probes the app-server when CODEX_ACCESS_TOKEN is set" "$result"
+pass "Codex collector probes the app-server when CODEX_ACCESS_TOKEN is set"
+
+# An API key alone does not log the app-server in.
+APIKEY_HOME=$(mktemp -d)
+mkdir -p "$APIKEY_HOME/bin" "$APIKEY_HOME/.codex"
+cp "$TEST_HOME/bin/codex" "$APIKEY_HOME/bin/codex"
+
+result=$(HOME="$APIKEY_HOME" CODEX_HOME="$APIKEY_HOME/.codex" CODEX_ARGS_FILE="$APIKEY_HOME/codex-args" XDG_DATA_HOME="$APIKEY_HOME/.local/share" \
+  PATH="$APIKEY_HOME/bin:$PATH" env -u CODEX_API_KEY -u CODEX_ACCESS_TOKEN OPENAI_API_KEY=x "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ ! -e $APIKEY_HOME/codex-args ]] ||
+  fail "Codex collector does not spawn app-server for an API key alone" "$result"
+pass "Codex collector does not spawn app-server for an API key alone"

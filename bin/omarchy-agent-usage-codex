@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -605,6 +606,24 @@ def reset_credits(result):
   }
 
 
+# Keyring and auto stores keep credentials outside auth.json, so only the file
+# store can be known to be empty without asking Codex.
+def has_codex_credentials(codex_home, env):
+  if env.get("CODEX_ACCESS_TOKEN"):
+    return True
+  try:
+    with (codex_home / "config.toml").open("rb") as handle:
+      config = tomllib.load(handle)
+  except FileNotFoundError:
+    config = {}
+  except Exception:
+    # A config this can't read may still name another store; let Codex say.
+    return True
+  if str(config.get("cli_auth_credentials_store") or "file") != "file":
+    return True
+  return (codex_home / "auth.json").is_file()
+
+
 def fetch_codex_rpc(home=None):
   result = {"limits": [], "tierLabel": "", "usageStatusText": "", "authHelpText": AUTH_HELP}
   env = dict(ENV, CODEX_HOME=str(home)) if home else ENV
@@ -612,6 +631,17 @@ def fetch_codex_rpc(home=None):
   if not codex:
     result["usageStatusText"] = "Codex unavailable"
     result["authHelpText"] = "codex not found in PATH"
+    return result
+
+  # No auth.json under the file store and no CODEX_ACCESS_TOKEN means
+  # account/read can only fail — and starting the app-server is not free: it
+  # syncs the plugin list, a git fetch per refresh that also leaves
+  # .tmp/git-* folders behind. The home is the one being probed, so a
+  # signed-out secondary account reads as signed out even while ~/.codex
+  # holds a login.
+  if not has_codex_credentials(Path(env.get("CODEX_HOME") or (Path.home() / ".codex")), env):
+    result["usageStatusText"] = "Waiting for auth"
+    result["authHelpText"] = AUTH_HELP
     return result
 
   try:
