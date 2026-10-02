@@ -278,18 +278,30 @@ def scan_projects(projects_path: Path, index_file: Path | None = None) -> dict[s
   # transcripts with the same output count, the last file visited wins, and
   # the numbers must not move because the scan got faster.
   order: list[str] = []
+  unreadable_count = 0
+  unreadable_examples: list[str] = []
   files = projects_path.rglob("*.jsonl") if projects_path.is_dir() else []
   for path in files:
     key = str(path)
     try:
       current[key] = parse_usage_records(path, previous.get(key))
     except Exception as exc:
-      print(f"Ignoring unreadable Claude project file {path}: {exc}", file=sys.stderr)
+      unreadable_count += 1
+      if len(unreadable_examples) < 3:
+        unreadable_examples.append(f"{path}: {exc}")
       # What was read before is still true of the file.
       if key in previous:
         current[key] = previous[key]
     if key in current:
       order.append(key)
+
+  if unreadable_count:
+    examples = "; ".join(unreadable_examples)
+    print(
+      f"Ignoring {unreadable_count} unreadable Claude project files"
+      f" (examples: {examples})",
+      file=sys.stderr,
+    )
 
   if index_file and current != previous:
     try:
