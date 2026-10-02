@@ -860,3 +860,156 @@ result=$(HOME="$APIKEY_HOME" CODEX_HOME="$APIKEY_HOME/.codex" CODEX_ARGS_FILE="$
 [[ ! -e $APIKEY_HOME/codex-args ]] ||
   fail "Codex collector does not spawn app-server for an API key alone" "$result"
 pass "Codex collector does not spawn app-server for an API key alone"
+
+# A codex that exits before speaking the protocol (rejected flag, crash, etc.)
+# must not leave the panel showing the bare RPC method name "initialize".
+EXIT_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME"' EXIT
+mkdir -p "$EXIT_HOME/bin" "$EXIT_HOME/.codex"
+touch "$EXIT_HOME/.codex/auth.json"
+cat >"$EXIT_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+echo "error: invalid value 'untrusted' for '--ask-for-approval <APPROVAL_POLICY>'" >&2
+echo "  [possible values: on-request, never]" >&2
+exit 2
+EOF
+chmod +x "$EXIT_HOME/bin/codex"
+
+result=$(HOME="$EXIT_HOME" CODEX_HOME="$EXIT_HOME/.codex" XDG_CACHE_HOME="$EXIT_HOME/.cache" XDG_DATA_HOME="$EXIT_HOME/.local/share" \
+  PATH="$EXIT_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ $(jq -r '.usageStatusText' <<<"$result") == "Codex limits unavailable" ]] ||
+  fail "Codex collector reports limits unavailable when app-server rejects argv" "$result"
+help=$(jq -r '.authHelpText' <<<"$result")
+[[ $help == *"invalid value 'untrusted'"* ]] ||
+  fail "Codex collector surfaces the CLI's own error" "$result"
+[[ $help != "initialize" ]] ||
+  fail "Codex collector must not leak the raw RPC method name" "$result"
+pass "Codex collector surfaces a rejected app-server call instead of the RPC method name"
+
+# EOF on stdout during initialize (process died) is reported as an exit, not a bare method.
+DEAD_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME"' EXIT
+mkdir -p "$DEAD_HOME/bin" "$DEAD_HOME/.codex"
+touch "$DEAD_HOME/.codex/auth.json"
+cat >"$DEAD_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+exec 1>&-
+exec sleep 30
+EOF
+chmod +x "$DEAD_HOME/bin/codex"
+
+result=$(HOME="$DEAD_HOME" CODEX_HOME="$DEAD_HOME/.codex" XDG_CACHE_HOME="$DEAD_HOME/.cache" XDG_DATA_HOME="$DEAD_HOME/.local/share" \
+  PATH="$DEAD_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+help=$(jq -r '.authHelpText' <<<"$result")
+[[ $help == "Codex app-server exited before initialize" ]] ||
+  fail "Codex collector identifies an app-server that exits during startup" "$result"
+pass "Codex collector identifies an app-server that exits during startup"
+
+# Failure while sending the initialized notification after initialize answered.
+HALF_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME"' EXIT
+mkdir -p "$HALF_HOME/bin" "$HALF_HOME/.codex"
+touch "$HALF_HOME/.codex/auth.json"
+cat >"$HALF_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+read -r request
+exec 0<&-
+jq -cn --argjson id "$(jq -r '.id' <<<"$request")" '{id: $id, result: {}}'
+exec sleep 30
+EOF
+chmod +x "$HALF_HOME/bin/codex"
+
+result=$(HOME="$HALF_HOME" CODEX_HOME="$HALF_HOME/.codex" XDG_CACHE_HOME="$HALF_HOME/.cache" XDG_DATA_HOME="$HALF_HOME/.local/share" \
+  PATH="$HALF_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+help=$(jq -r '.authHelpText' <<<"$result")
+[[ $help == "Codex app-server exited before initialized" ]] ||
+  fail "Codex collector translates failure to send the initialized notification" "$result"
+pass "Codex collector translates failure to send the initialized notification"
+
+# Silent clean exit with no stderr: fall back to the login hint.
+SILENT_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME"' EXIT
+mkdir -p "$SILENT_HOME/bin" "$SILENT_HOME/.codex"
+touch "$SILENT_HOME/.codex/auth.json"
+cat >"$SILENT_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "$SILENT_HOME/bin/codex"
+
+result=$(HOME="$SILENT_HOME" CODEX_HOME="$SILENT_HOME/.codex" XDG_CACHE_HOME="$SILENT_HOME/.cache" XDG_DATA_HOME="$SILENT_HOME/.local/share" \
+  PATH="$SILENT_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+help=$(jq -r '.authHelpText' <<<"$result")
+[[ $help == "Run \`codex login\` to authenticate." ]] ||
+  fail "Codex collector falls back to the login hint when the CLI is silent" "$result"
+pass "Codex collector falls back to the login hint when the app-server says nothing"
+
+# Live app-server that stalls on account/rateLimits/read: keep a clear stall message, not login.
+STALL_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME"' EXIT
+mkdir -p "$STALL_HOME/bin" "$STALL_HOME/.codex"
+touch "$STALL_HOME/.codex/auth.json"
+cat >"$STALL_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+while read -r request; do
+  id=$(jq -r '.id // empty' <<<"$request")
+  method=$(jq -r '.method // empty' <<<"$request")
+  case "$method" in
+    initialize) jq -cn --argjson id "$id" '{id: $id, result: {}}' ;;
+    account/rateLimits/read) : ;;
+  esac
+done
+EOF
+chmod +x "$STALL_HOME/bin/codex"
+
+result=$(HOME="$STALL_HOME" CODEX_HOME="$STALL_HOME/.codex" XDG_CACHE_HOME="$STALL_HOME/.cache" XDG_DATA_HOME="$STALL_HOME/.local/share" \
+  PATH="$STALL_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+help=$(jq -r '.authHelpText' <<<"$result")
+[[ $help != "Run \`codex login\` to authenticate." ]] ||
+  fail "Codex collector must not blame auth when the app-server is merely stalled" "$result"
+[[ $help == "Codex app-server did not answer account/rateLimits/read" ]] ||
+  fail "Codex collector names the stalled RPC method clearly" "$result"
+[[ $help != "account/rateLimits/read" && $help != "initialize" ]] ||
+  fail "Codex collector must not leak a bare method name" "$result"
+pass "Codex collector names a stalled RPC instead of leaking the method name"
+
+# A stalled app-server that has logged to stderr is still running: its logging
+# is not why it stopped, and it has not exited.
+NOISY_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME"' EXIT
+mkdir -p "$NOISY_HOME/bin" "$NOISY_HOME/.codex"
+touch "$NOISY_HOME/.codex/auth.json"
+sed 's/^while read/echo "WARN codex_core: startup notice" >\&2\nwhile read/' "$STALL_HOME/bin/codex" >"$NOISY_HOME/bin/codex"
+chmod +x "$NOISY_HOME/bin/codex"
+
+result=$(HOME="$NOISY_HOME" CODEX_HOME="$NOISY_HOME/.codex" XDG_CACHE_HOME="$NOISY_HOME/.cache" XDG_DATA_HOME="$NOISY_HOME/.local/share" \
+  PATH="$NOISY_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ $(jq -r '.authHelpText' <<<"$result") == "Codex app-server did not answer account/rateLimits/read" ]] ||
+  fail "Codex collector reports a stall, not an exit, when a live app-server has logged" "$result"
+pass "Codex collector reports a stall, not an exit, when a live app-server has logged"
+
+# A CLI that logs plenty before failing must still show the failure, not the logging.
+CHATTY_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME"' EXIT
+mkdir -p "$CHATTY_HOME/bin" "$CHATTY_HOME/.codex"
+touch "$CHATTY_HOME/.codex/auth.json"
+cat >"$CHATTY_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+for i in {1..20}; do echo "WARN codex_core::config: ignoring unknown key number $i" >&2; done
+echo "error: failed to start app-server" >&2
+exit 1
+EOF
+chmod +x "$CHATTY_HOME/bin/codex"
+
+result=$(HOME="$CHATTY_HOME" CODEX_HOME="$CHATTY_HOME/.codex" XDG_CACHE_HOME="$CHATTY_HOME/.cache" XDG_DATA_HOME="$CHATTY_HOME/.local/share" \
+  PATH="$CHATTY_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --limits-only)
+
+[[ $(jq -r '.authHelpText' <<<"$result") == "codex app-server exited: "*"error: failed to start app-server" ]] ||
+  fail "Codex collector keeps the CLI's final error past its startup logging" "$result"
+pass "Codex collector keeps the CLI's final error past its startup logging"
