@@ -762,8 +762,48 @@ def oauth_login(claude_dir: Path) -> tuple[str, int, str]:
   login = data.get("claudeAiOauth")
   if not isinstance(login, dict):
     return "", 0, ""
-  plan = plan_label(str(login.get("rateLimitTier") or ""), str(login.get("subscriptionType") or ""))
+  # The profile's tier is asked first, but only one that names a multiplier
+  # outranks the credentials'. The subscription still leads the label, so a
+  # Team seat keeps reading Team.
+  tier = profile_tier(claude_dir)
+  if not re.search(r"max_(\d+x)", tier, re.IGNORECASE):
+    tier = str(login.get("rateLimitTier") or "")
+  plan = plan_label(tier, str(login.get("subscriptionType") or ""))
   return str(login.get("accessToken") or ""), number(login.get("expiresAt")), plan
+
+
+# The credentials carry the tier their token was minted with, and an upgrade
+# does not restamp it: a refresh rewrites the file and keeps the old value, so
+# an account moved to Max 20x keeps reading Max 5x. The CLI's own profile is
+# refreshed against the account, so the tier it states there is asked first.
+def profile_tier(claude_dir: Path) -> str:
+  try:
+    account = json.loads(profile_path(claude_dir).read_text(encoding="utf-8")).get("oauthAccount")
+  except Exception:
+    return ""
+  if not isinstance(account, dict):
+    return ""
+  # A seat with no tier of its own is limited by its organization, which is
+  # the shape a personal Max subscription takes.
+  for key in ("userRateLimitTier", "organizationRateLimitTier"):
+    tier = str(account.get(key) or "")
+    if tier:
+      return tier
+  return ""
+
+
+# The CLI's profile for a config home: a legacy .config.json inside it, else
+# ~/.claude.json for the default home and <home>/.claude.json for one it was
+# pointed at with CLAUDE_CONFIG_DIR. A copy anywhere else is never refreshed,
+# and another home's profile describes another account.
+def profile_path(home: Path) -> Path:
+  legacy = home / ".config.json"
+  if legacy.exists():
+    return legacy
+  configured = os.environ.get("CLAUDE_CONFIG_DIR")
+  if home == expand_path("~/.claude") and not (configured and expand_path(configured) == home):
+    return Path.home() / ".claude.json"
+  return home / ".claude.json"
 
 
 # The rate-limit tier names the ceiling, not the plan: a Team premium seat
@@ -1079,9 +1119,8 @@ def replenished_limits(cache_name: str) -> list[dict[str, Any]]:
 
 
 def current_account_id(home: Path) -> str:
-  path = Path.home() / ".claude.json" if home == expand_path("~/.claude") else home / ".claude.json"
   try:
-    account = json.loads(path.read_text(encoding="utf-8")).get("oauthAccount") or {}
+    account = json.loads(profile_path(home).read_text(encoding="utf-8")).get("oauthAccount") or {}
   except Exception:
     return ""
   return str(account.get("accountUuid") or "")
