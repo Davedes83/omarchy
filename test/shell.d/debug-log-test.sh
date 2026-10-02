@@ -23,24 +23,19 @@ for path in "$log" "$legacy_upload" "$legacy_system_info"; do
   fi
 done
 
-# The staging files the scripts create are named randomly, so record which ones
-# exist before the run. Whatever matches the same prefixes afterwards and is not
-# in this list is something the run created.
-staging_paths() {
-  compgen -G '/tmp/omarchy-debug.????????' || true
-  compgen -G '/tmp/omarchy-upload-log.????????' || true
-  compgen -G '/tmp/omarchy-system-info.????????' || true
-}
-
-staging_before="$tmp/staging-before"
-staging_paths | sort >"$staging_before"
+# The staging files the scripts create are named randomly, so glob /tmp to find
+# them afterwards would also match a helper running at the same time -- deleting
+# its working file, or a stale one left by an earlier run. Instead an mktemp stub
+# records every path it hands out, and the test only ever touches those.
+manifest="$tmp/mktemp-manifest"
 
 cleanup() {
   local path
-  while IFS= read -r path; do
-    [[ -n $path ]] || continue
-    grep -Fxq -- "$path" "$staging_before" || rm -f -- "$path"
-  done < <(staging_paths)
+  if [[ -f $manifest ]]; then
+    while IFS= read -r path; do
+      [[ -n $path ]] && rm -f -- "$path"
+    done <"$manifest"
+  fi
 
   rm -f -- "$log" "$legacy_upload" "$legacy_system_info"
   for path in ${saved_paths[@]+"${saved_paths[@]}"}; do
@@ -60,6 +55,15 @@ echo "[stub $tool]"
 EOF
   chmod +x "$tmp/bin/$tool"
 done
+
+# Real mktemp, plus a note of what it created.
+cat >"$tmp/bin/mktemp" <<'EOF'
+#!/bin/bash
+path=$(/usr/bin/mktemp "$@") || exit $?
+printf '%s\n' "$path" >>"$MKTEMP_MANIFEST"
+echo "$path"
+EOF
+chmod +x "$tmp/bin/mktemp"
 
 # The upload stub reports what it was actually handed, so the assertions below
 # read the file the script published rather than trusting the URL it printed.
@@ -89,12 +93,16 @@ chmod +x "$tmp/bin/curl"
 canary="$tmp/canary"
 printf 'untouched\n' >"$canary"
 
+# Start recording before either helper runs.
+: >"$manifest"
+
 # --- omarchy-debug -------------------------------------------------------
 
 rm -f "$log"
 ln -s "$canary" "$log"
 
-PATH="$tmp/bin:$ROOT/bin:$PATH" "$ROOT/bin/omarchy-debug" --no-sudo --print >"$tmp/printed" 2>/dev/null || true
+MKTEMP_MANIFEST="$manifest" PATH="$tmp/bin:$ROOT/bin:$PATH" \
+  "$ROOT/bin/omarchy-debug" --no-sudo --print >"$tmp/printed" 2>/dev/null || true
 
 [[ $(cat "$canary") == untouched ]] ||
   fail "omarchy debug does not write through a symlink another local process planted" \
@@ -132,7 +140,8 @@ printf 'upload canary\n' >"$tmp/upload-canary"
 ln -s "$tmp/upload-canary" "$legacy_upload"
 ln -s "$tmp/upload-canary" "$legacy_system_info"
 
-upload_out=$(CURL_REPORT="$tmp/curl-report" PATH="$tmp/bin:$ROOT/bin:$PATH" \
+upload_out=$(CURL_REPORT="$tmp/curl-report" MKTEMP_MANIFEST="$manifest" \
+  PATH="$tmp/bin:$ROOT/bin:$PATH" \
   "$ROOT/bin/omarchy-upload-log" installed 2>&1 || true)
 
 [[ $(cat "$tmp/upload-canary") == "upload canary" ]] ||
@@ -181,9 +190,15 @@ grep -q 'https://logs.omarchy.org/stub' <<<"$upload_out" ||
   fail "omarchy upload-log still uploads and reports the URL" "$upload_out"
 pass "omarchy upload-log still uploads and reports the URL"
 
-# Nothing either helper staged may outlive it.
-staging_paths | sort >"$tmp/staging-after"
-leftovers=$(comm -13 "$staging_before" "$tmp/staging-after")
-[[ -z $leftovers ]] ||
-  fail "the helpers leave no staging file behind" "$leftovers"
+# Nothing either helper staged may outlive it. The manifest is the exact list of
+# files the scripts created, so this needs no scan of /tmp.
+[[ -s $manifest ]] || fail "the helpers stage their logs in a temporary file"
+pass "the helpers stage their logs in a temporary file"
+
+while IFS= read -r staged; do
+  [[ -n $staged ]] || continue
+  if [[ -e $staged || -L $staged ]]; then
+    fail "the helpers leave no staging file behind" "$staged still exists"
+  fi
+done <"$manifest"
 pass "the helpers leave no staging file behind"
