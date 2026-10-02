@@ -126,7 +126,7 @@ pass "Codex collector counts pi sessions when HOME is a git checkout"
 # A subscription burned entirely through opencode has no native session files;
 # usage must come from opencode's message database, filtered to OpenAI.
 OPENCODE_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME"' EXIT
 mkdir -p "$OPENCODE_HOME/bin"
 mkdir -p "$OPENCODE_HOME/.codex" && touch "$OPENCODE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$OPENCODE_HOME/bin/codex"
@@ -178,7 +178,7 @@ pass "Codex collector ignores prefix-colliding providers, user messages, and mal
 # A warm cache makes --limits-only cheap: local stats come from the last scan
 # instead of another walk over the opencode database, and --force bypasses it.
 CACHE_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME"' EXIT
 mkdir -p "$CACHE_HOME/bin"
 mkdir -p "$CACHE_HOME/.codex" && touch "$CACHE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$CACHE_HOME/bin/codex"
@@ -443,7 +443,7 @@ pass "Codex collector treats a future-dated cache as a miss"
 
 # First --limits-only on a machine with no cache falls back to a full scan.
 FRESH_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME"' EXIT
 mkdir -p "$FRESH_HOME/bin"
 mkdir -p "$FRESH_HOME/.codex" && touch "$FRESH_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$FRESH_HOME/bin/codex"
@@ -484,7 +484,7 @@ pass "Codex collector --limits-only falls back to a full scan without a cache"
 # parse, so the good rows are still counted. Real opencode data also stores
 # compact JSON, so one row is serialized compactly here on purpose.
 MALFORMED_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME"' EXIT
 mkdir -p "$MALFORMED_HOME/bin"
 mkdir -p "$MALFORMED_HOME/.codex" && touch "$MALFORMED_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$MALFORMED_HOME/bin/codex"
@@ -539,7 +539,7 @@ pass "Codex collector counts good opencode rows past malformed ones"
 
 # An unwritable cache must not kill the collector: the record is the contract.
 UNWRITABLE_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME"' EXIT
 mkdir -p "$UNWRITABLE_HOME/bin"
 mkdir -p "$UNWRITABLE_HOME/.codex" && touch "$UNWRITABLE_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$UNWRITABLE_HOME/bin/codex"
@@ -582,7 +582,7 @@ pass "Codex collector still prints a complete record when the cache is unwritabl
 # corruption) must not be cached as the whole story, or the missing usage
 # would be suppressed for every reader until the cache expires.
 INTERRUPTED_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$GIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME"' EXIT
 mkdir -p "$INTERRUPTED_HOME/bin"
 mkdir -p "$INTERRUPTED_HOME/.codex" && touch "$INTERRUPTED_HOME/.codex/auth.json"
 cp "$TEST_HOME/bin/codex" "$INTERRUPTED_HOME/bin/codex"
@@ -676,7 +676,7 @@ pass "Codex collector reports a missing sign-in as one"
 # that shares a write with a notification must not be stranded in a read
 # buffer, and bytes left over from one request must carry into the next.
 BATCHED_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME"' EXIT
 mkdir -p "$BATCHED_HOME/bin"
 mkdir -p "$BATCHED_HOME/.codex" && touch "$BATCHED_HOME/.codex/auth.json"
 cat >"$BATCHED_HOME/bin/codex" <<'EOF'
@@ -723,7 +723,7 @@ for tool in python3 rg; do
     ln -s "$(command -v "$tool")" "$SAFE_PATH/$tool"
   fi
 done
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME"' EXIT
 mkdir -p "$LAUNCH_HOME/bin" "$LAUNCH_HOME/.local/bin" "$LAUNCH_HOME/.codex"
 touch "$LAUNCH_HOME/.codex/auth.json"
 cat >"$LAUNCH_HOME/.local/bin/codex" <<'LAUNCHER'
@@ -771,7 +771,7 @@ pass "Codex collector probes the mise-resolved binary"
 # A symlink at the launcher path is the user's own binary, so it is probed
 # directly without asking mise at all.
 LINK_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME"' EXIT
 mkdir -p "$LINK_HOME/bin" "$LINK_HOME/.local/bin" "$LINK_HOME/.codex"
 touch "$LINK_HOME/.codex/auth.json"
 ln -s "$TEST_HOME/bin/codex" "$LINK_HOME/.local/bin/codex"
@@ -793,7 +793,7 @@ pass "Codex collector probes a user-owned symlink at the launcher path"
 # not to an installed codex — running it would exec `mise x` and install the
 # tool. It must be treated as lazy despite being a symlink.
 SHIM_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME"' EXIT
 mkdir -p "$SHIM_HOME/bin" "$SHIM_HOME/.local/share/mise/shims"
 cat >"$SHIM_HOME/bin/mise" <<STUB
 #!/bin/bash
@@ -817,7 +817,7 @@ pass "Codex collector treats a shim symlink to mise as lazy"
 # that leaves ~/.codex/.tmp/git-* folders behind. The collector must not
 # spawn codex at all.
 NOAUTH_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME"' EXIT
 mkdir -p "$NOAUTH_HOME/bin"
 cp "$TEST_HOME/bin/codex" "$NOAUTH_HOME/bin/codex"
 
@@ -833,7 +833,7 @@ pass "Codex collector does not spawn app-server without credentials"
 # A non-file credentials store keeps credentials outside auth.json, so the
 # probe must still run.
 KEYRING_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME"' EXIT
 mkdir -p "$KEYRING_HOME/bin" "$KEYRING_HOME/.codex"
 cp "$TEST_HOME/bin/codex" "$KEYRING_HOME/bin/codex"
 printf 'cli_auth_credentials_store = "keyring"\n' >"$KEYRING_HOME/.codex/config.toml"
@@ -887,7 +887,7 @@ pass "Codex collector does not spawn app-server for an API key alone"
 # A codex that exits before speaking the protocol (rejected flag, crash, etc.)
 # must not leave the panel showing the bare RPC method name "initialize".
 EXIT_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME"' EXIT
 mkdir -p "$EXIT_HOME/bin" "$EXIT_HOME/.codex"
 touch "$EXIT_HOME/.codex/auth.json"
 cat >"$EXIT_HOME/bin/codex" <<'EOF'
@@ -912,7 +912,7 @@ pass "Codex collector surfaces a rejected app-server call instead of the RPC met
 
 # EOF on stdout during initialize (process died) is reported as an exit, not a bare method.
 DEAD_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME"' EXIT
 mkdir -p "$DEAD_HOME/bin" "$DEAD_HOME/.codex"
 touch "$DEAD_HOME/.codex/auth.json"
 cat >"$DEAD_HOME/bin/codex" <<'EOF'
@@ -932,7 +932,7 @@ pass "Codex collector identifies an app-server that exits during startup"
 
 # Failure while sending the initialized notification after initialize answered.
 HALF_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME"' EXIT
 mkdir -p "$HALF_HOME/bin" "$HALF_HOME/.codex"
 touch "$HALF_HOME/.codex/auth.json"
 cat >"$HALF_HOME/bin/codex" <<'EOF'
@@ -954,7 +954,7 @@ pass "Codex collector translates failure to send the initialized notification"
 
 # Silent clean exit with no stderr: fall back to the login hint.
 SILENT_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME"' EXIT
 mkdir -p "$SILENT_HOME/bin" "$SILENT_HOME/.codex"
 touch "$SILENT_HOME/.codex/auth.json"
 cat >"$SILENT_HOME/bin/codex" <<'EOF'
@@ -973,7 +973,7 @@ pass "Codex collector falls back to the login hint when the app-server says noth
 
 # Live app-server that stalls on account/rateLimits/read: keep a clear stall message, not login.
 STALL_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME"' EXIT
 mkdir -p "$STALL_HOME/bin" "$STALL_HOME/.codex"
 touch "$STALL_HOME/.codex/auth.json"
 cat >"$STALL_HOME/bin/codex" <<'EOF'
@@ -1004,7 +1004,7 @@ pass "Codex collector names a stalled RPC instead of leaking the method name"
 # A stalled app-server that has logged to stderr is still running: its logging
 # is not why it stopped, and it has not exited.
 NOISY_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME"' EXIT
 mkdir -p "$NOISY_HOME/bin" "$NOISY_HOME/.codex"
 touch "$NOISY_HOME/.codex/auth.json"
 sed 's/^while read/echo "WARN codex_core: startup notice" >\&2\nwhile read/' "$STALL_HOME/bin/codex" >"$NOISY_HOME/bin/codex"
@@ -1019,7 +1019,7 @@ pass "Codex collector reports a stall, not an exit, when a live app-server has l
 
 # A CLI that logs plenty before failing must still show the failure, not the logging.
 CHATTY_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME"' EXIT
 mkdir -p "$CHATTY_HOME/bin" "$CHATTY_HOME/.codex"
 touch "$CHATTY_HOME/.codex/auth.json"
 cat >"$CHATTY_HOME/bin/codex" <<'EOF'
@@ -1036,3 +1036,45 @@ result=$(HOME="$CHATTY_HOME" CODEX_HOME="$CHATTY_HOME/.codex" XDG_CACHE_HOME="$C
 [[ $(jq -r '.authHelpText' <<<"$result") == "codex app-server exited: "*"error: failed to start app-server" ]] ||
   fail "Codex collector keeps the CLI's final error past its startup logging" "$result"
 pass "Codex collector keeps the CLI's final error past its startup logging"
+
+# Codex CLI can front any OpenAI-compatible backend (`--oss`, or a custom
+# model_provider in config.toml). Those rollouts land in the same sessions
+# directory but spend a local box or a third party, never this subscription.
+PROVIDER_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME" "$PROVIDER_HOME"' EXIT
+mkdir -p "$PROVIDER_HOME/bin" "$PROVIDER_HOME/.codex/sessions/$(date +%Y/%m/%d)"
+cp "$TEST_HOME/bin/codex" "$PROVIDER_HOME/bin/codex"
+
+provider_session() {
+  local name=$1 meta=$2 model=$3 input=$4 output=$5
+  local file="$PROVIDER_HOME/.codex/sessions/$(date +%Y/%m/%d)/rollout-$name.jsonl"
+  [[ -n $meta ]] && echo "{\"timestamp\":\"$timestamp\",\"type\":\"session_meta\",\"payload\":{\"model_provider\":\"$meta\"}}" >"$file"
+  cat >>"$file" <<EOF
+{"timestamp":"$timestamp","type":"turn_context","payload":{"model":"$model"}}
+{"timestamp":"$timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":$input,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":$output,"reasoning_output_tokens":0}}}}
+EOF
+}
+
+provider_session native openai gpt-native 100 10
+provider_session ollama ollama qwen3-coder:30b 9000 900
+provider_session openrouter openrouter claude-test 5000 500
+# Rollouts written before Codex recorded the field have a session_meta with no
+# provider; they must still count rather than silently drop a user's history.
+provider_session legacy "" gpt-legacy 40 0
+sed -i "1i {\"timestamp\":\"$timestamp\",\"type\":\"session_meta\",\"payload\":{\"id\":\"legacy\"}}" \
+  "$PROVIDER_HOME/.codex/sessions/$(date +%Y/%m/%d)/rollout-legacy.jsonl"
+# A fork copies its parent's session_meta after its own; the first one decides.
+provider_session fork openai gpt-fork 3 0
+sed -i "1a {\"timestamp\":\"$timestamp\",\"type\":\"session_meta\",\"payload\":{\"model_provider\":\"ollama\"}}" \
+  "$PROVIDER_HOME/.codex/sessions/$(date +%Y/%m/%d)/rollout-fork.jsonl"
+
+result=$(HOME="$PROVIDER_HOME" CODEX_HOME="$PROVIDER_HOME/.codex" XDG_CACHE_HOME="$PROVIDER_HOME/.cache" XDG_DATA_HOME="$PROVIDER_HOME/.local/share" \
+  PATH="$PROVIDER_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex")
+
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "153" ]] ||
+  fail "Codex collector counts only subscription-backed native sessions" "$result"
+[[ $(jq -r '.modelUsage | keys | join(",")' <<<"$result") == "gpt-fork,gpt-legacy,gpt-native" ]] ||
+  fail "Codex collector excludes local and third-party providers from native sessions" "$result"
+[[ $(jq -r '.todaySessions' <<<"$result") == "3" ]] ||
+  fail "Codex collector excludes foreign-provider rollouts from the session count" "$result"
+pass "Codex collector ignores native sessions served by a non-OpenAI provider"
