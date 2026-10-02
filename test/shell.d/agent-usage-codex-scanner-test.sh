@@ -640,3 +640,41 @@ result=$(HOME="$TEST_HOME" CODEX_HOME="$TEST_HOME/.codex" XDG_DATA_HOME="$TEST_H
 [[ $(jq -r '.usageStatusText' <<<"$result") == "Waiting for auth" ]] ||
   fail "Codex collector reports a missing sign-in as one" "$result"
 pass "Codex collector reports a missing sign-in as one"
+
+# The app-server batches notifications with replies in one write. A reply
+# that shares a write with a notification must not be stranded in a read
+# buffer, and bytes left over from one request must carry into the next.
+BATCHED_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME"' EXIT
+mkdir -p "$BATCHED_HOME/bin"
+cat >"$BATCHED_HOME/bin/codex" <<'EOF'
+#!/bin/bash
+
+while read -r request; do
+  id=$(jq -r '.id // empty' <<<"$request")
+  method=$(jq -r '.method // empty' <<<"$request")
+
+  case "$method" in
+    initialize)
+      # One write: this reply and a trailing notification.
+      printf '%s\n%s\n' \
+        "$(jq -cn --argjson id "$id" '{id: $id, result: {}}')" \
+        '{"method":"remoteControl/status/changed","params":{"status":"disabled"}}'
+      ;;
+    account/rateLimits/read)
+      # One write: a notification ahead of this reply.
+      printf '%s\n%s\n' \
+        '{"method":"account/updated","params":{"authMode":"chatgpt","planType":"plus"}}' \
+        "$(jq -cn --argjson id "$id" '{id: $id, result: {rateLimits: {planType: "plus", primary: {usedPercent: 5, windowDurationMins: 300, resetsAt: 1790659194}}}}')"
+      ;;
+  esac
+done
+EOF
+chmod +x "$BATCHED_HOME/bin/codex"
+
+result=$(HOME="$BATCHED_HOME" CODEX_HOME="$BATCHED_HOME/.codex" XDG_CACHE_HOME="$BATCHED_HOME/.cache" XDG_DATA_HOME="$BATCHED_HOME/.local/share" \
+  PATH="$BATCHED_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex")
+
+[[ $(jq -c '{tierLabel, usageStatusText, limits: [.limits[] | {label, percent}]}' <<<"$result") == '{"tierLabel":"plus","usageStatusText":"","limits":[{"label":"5h window","percent":0.05}]}' ]] ||
+  fail "Codex collector reads replies batched with notifications" "$result"
+pass "Codex collector reads replies batched with notifications"
