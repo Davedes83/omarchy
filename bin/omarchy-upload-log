@@ -13,7 +13,7 @@ LOG_TYPE="${1:-install}"
 # owner-only because what they collect is the machine's identity and, for the
 # boot types, the whole journal.
 SYSTEM_INFO=$(mktemp /tmp/omarchy-system-info.XXXXXXXX) || exit 1
-TEMP_LOG=$(mktemp /tmp/omarchy-upload-log.XXXXXXXX) || exit 1
+TEMP_LOG=$(mktemp /tmp/omarchy-upload-log.XXXXXXXX) || { rm -f "$SYSTEM_INFO"; exit 1; }
 trap 'rm -f "$SYSTEM_INFO" "$TEMP_LOG"' EXIT
 
 # Get system information if fastfetch is available

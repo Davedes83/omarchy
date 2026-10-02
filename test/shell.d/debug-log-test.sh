@@ -5,43 +5,83 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 # Both helpers publish to a fixed name in world-writable /tmp, so the test has to
-# exercise those exact names. Anything already there is moved aside first and put
-# back on the way out.
+# exercise those exact names. Anything already there is copied aside first and put
+# back on the way out, and only the staging files this test causes are removed --
+# another helper running at the same time keeps its own working file.
 log=/tmp/omarchy-debug.log
 legacy_upload=/tmp/upload-log.txt
 legacy_system_info=/tmp/system-info.txt
 tmp=$(mktemp -d)
-saved_log=""
-had_saved_log=false
+saved="$tmp/saved"
+mkdir -p "$saved"
+saved_paths=()
+
+for path in "$log" "$legacy_upload" "$legacy_system_info"; do
+  if [[ -e $path || -L $path ]]; then
+    cp -a -- "$path" "$saved/${path##*/}"
+    saved_paths+=("$path")
+  fi
+done
+
+# The staging files the scripts create are named randomly, so record which ones
+# exist before the run. Whatever matches the same prefixes afterwards and is not
+# in this list is something the run created.
+staging_paths() {
+  compgen -G '/tmp/omarchy-debug.????????' || true
+  compgen -G '/tmp/omarchy-upload-log.????????' || true
+  compgen -G '/tmp/omarchy-system-info.????????' || true
+}
+
+staging_before="$tmp/staging-before"
+staging_paths | sort >"$staging_before"
 
 cleanup() {
-  rm -f "$log" "$legacy_upload" "$legacy_system_info"
-  rm -f /tmp/omarchy-debug.* /tmp/omarchy-upload-log.* /tmp/omarchy-system-info.* 2>/dev/null || true
-  if $had_saved_log; then
-    mv -f "$saved_log" "$log"
-  fi
+  local path
+  while IFS= read -r path; do
+    [[ -n $path ]] || continue
+    grep -Fxq -- "$path" "$staging_before" || rm -f -- "$path"
+  done < <(staging_paths)
+
+  rm -f -- "$log" "$legacy_upload" "$legacy_system_info"
+  for path in ${saved_paths[@]+"${saved_paths[@]}"}; do
+    cp -a -- "$saved/${path##*/}" "$path"
+  done
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 
-if [[ -e $log || -L $log ]]; then
-  saved_log="$tmp/saved-omarchy-debug.log"
-  mv -f "$log" "$saved_log"
-  had_saved_log=true
-fi
-
 # Stubs keep the collection cheap and offline: no sudo, no network, and nothing
 # that depends on what this machine happens to have installed.
 mkdir -p "$tmp/bin"
-for tool in inxi journalctl expac pacman fastfetch curl date hostname; do
+for tool in inxi journalctl expac pacman fastfetch date hostname; do
   cat >"$tmp/bin/$tool" <<EOF
 #!/bin/bash
 echo "[stub $tool]"
 EOF
   chmod +x "$tmp/bin/$tool"
 done
+
+# The upload stub reports what it was actually handed, so the assertions below
+# read the file the script published rather than trusting the URL it printed.
 cat >"$tmp/bin/curl" <<'EOF'
 #!/bin/bash
+report=$CURL_REPORT
+target=""
+for arg in "$@"; do
+  case "$arg" in
+    file=@*) target=${arg#file=@} ;;
+  esac
+done
+{
+  printf 'path=%s\n' "$target"
+  if [[ -f $target ]]; then
+    printf 'exists=yes\n'
+    printf 'mode=%s\n' "$(stat -c '%a' "$target")"
+    printf 'has_diagnostics=%s\n' "$(grep -q 'SYSTEM INFORMATION' "$target" && echo yes || echo no)"
+  else
+    printf 'exists=no\n'
+  fi
+} >"$report"
 echo "https://logs.omarchy.org/stub"
 EOF
 chmod +x "$tmp/bin/curl"
@@ -85,10 +125,6 @@ else
   skip "the filesystem does not report modes; cannot check the log's permissions"
 fi
 
-leftovers=$(compgen -G '/tmp/omarchy-debug.????????' || true)
-[[ -z $leftovers ]] || fail "omarchy debug leaves no staging file behind" "$leftovers"
-pass "omarchy debug leaves no staging file behind"
-
 # --- omarchy-upload-log --------------------------------------------------
 
 rm -f "$legacy_upload" "$legacy_system_info"
@@ -96,7 +132,8 @@ printf 'upload canary\n' >"$tmp/upload-canary"
 ln -s "$tmp/upload-canary" "$legacy_upload"
 ln -s "$tmp/upload-canary" "$legacy_system_info"
 
-upload_out=$(PATH="$tmp/bin:$ROOT/bin:$PATH" "$ROOT/bin/omarchy-upload-log" installed 2>&1 || true)
+upload_out=$(CURL_REPORT="$tmp/curl-report" PATH="$tmp/bin:$ROOT/bin:$PATH" \
+  "$ROOT/bin/omarchy-upload-log" installed 2>&1 || true)
 
 [[ $(cat "$tmp/upload-canary") == "upload canary" ]] ||
   fail "omarchy upload-log does not write through the symlinks it used to own" \
@@ -108,13 +145,45 @@ if [[ ! -L $legacy_upload || ! -L $legacy_system_info ]]; then
     "$legacy_upload: $(stat -c '%F' "$legacy_upload" 2>/dev/null || echo missing)
 $legacy_system_info: $(stat -c '%F' "$legacy_system_info" 2>/dev/null || echo missing)"
 fi
-pass "omarchy upload-log collects into private temporary files"
+pass "omarchy upload-log leaves the legacy fixed names as they were"
 
-upload_leftovers=$(compgen -G '/tmp/omarchy-upload-log.????????' || true)$(compgen -G '/tmp/omarchy-system-info.????????' || true)
-[[ -z $upload_leftovers ]] ||
-  fail "omarchy upload-log removes its temporary files" "$upload_leftovers"
-pass "omarchy upload-log removes its temporary files"
+# The file curl was handed is the one that matters: it has to exist, carry the
+# diagnostics, be owner-only while it sits in /tmp, and no longer be the fixed
+# name another local process could pre-create.
+[[ -f $tmp/curl-report ]] || fail "omarchy upload-log uploaded a file" "$upload_out"
+report=$(cat "$tmp/curl-report")
+
+grep -qx 'exists=yes' "$tmp/curl-report" ||
+  fail "the uploaded file exists at upload time" "$report"
+pass "the uploaded file exists at upload time"
+
+grep -qx 'has_diagnostics=yes' "$tmp/curl-report" ||
+  fail "the uploaded file carries the collected diagnostics" "$report"
+pass "the uploaded file carries the collected diagnostics"
+
+uploaded=$(sed -n 's/^path=//p' "$tmp/curl-report")
+if [[ $uploaded == "$legacy_upload" || $uploaded == "$legacy_system_info" ]]; then
+  fail "omarchy upload-log uploads from a private temporary file" "uploaded: $uploaded"
+fi
+pass "omarchy upload-log uploads from a private temporary file"
+
+upload_mode=$(sed -n 's/^mode=//p' "$tmp/curl-report")
+if [[ -n $upload_mode ]]; then
+  if (( 8#$upload_mode & 077 )); then
+    fail "the uploaded file is owner-only while it sits in /tmp" "mode: $upload_mode"
+  fi
+  pass "the uploaded file is owner-only while it sits in /tmp"
+else
+  skip "the filesystem does not report modes; cannot check the uploaded file's permissions"
+fi
 
 grep -q 'https://logs.omarchy.org/stub' <<<"$upload_out" ||
   fail "omarchy upload-log still uploads and reports the URL" "$upload_out"
 pass "omarchy upload-log still uploads and reports the URL"
+
+# Nothing either helper staged may outlive it.
+staging_paths | sort >"$tmp/staging-after"
+leftovers=$(comm -13 "$staging_before" "$tmp/staging-after")
+[[ -z $leftovers ]] ||
+  fail "the helpers leave no staging file behind" "$leftovers"
+pass "the helpers leave no staging file behind"
