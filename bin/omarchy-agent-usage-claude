@@ -374,12 +374,22 @@ def scan_cache_paths(projects_path: Path) -> tuple[Path, Path, Path]:
   return root / f"claude-scan-{digest}.json", root / f"claude-scan-{digest}.lock", root / f"claude-index-{digest}.json"
 
 
+def read_json(path: Path) -> dict[str, Any] | None:
+  try:
+    return json.loads(path.read_text(encoding="utf-8"))
+  except Exception:
+    return None
+
+
 def read_fresh_json(path: Path, max_age_seconds: float) -> dict[str, Any] | None:
   if max_age_seconds <= 0 or not path.exists():
     return None
   try:
-    if time.time() - path.stat().st_mtime <= max_age_seconds:
-      return json.loads(path.read_text(encoding="utf-8"))
+    # A negative age means the mtime is in the future: the clock moved
+    # backwards since the write, so the cache's freshness cannot be trusted.
+    age = time.time() - path.stat().st_mtime
+    if 0 <= age <= max_age_seconds:
+      return read_json(path)
   except Exception:
     return None
   return None
@@ -1025,7 +1035,7 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
   # kept as the answer of record when a later probe fails. Every account
   # keeps its own, so one account's allowance never stands in for another's.
   probe_cache = cache_root() / cache_name
-  cached = read_fresh_json(probe_cache, float("inf")) or {}
+  cached = read_json(probe_cache) or {}
   fallback = usable_cached_limits(cached)
   result["fetchedAtMs"] = number(cached.get("fetchedAtMs"))
 
@@ -1065,7 +1075,8 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
   # entirely; the interval is there to absorb repeated panel opens, not to
   # overrule someone who pressed refresh.
   fetched_at = number(cached.get("fetchedAtMs")) / 1000
-  if fallback and not force and time.time() - fetched_at < PROBE_MIN_INTERVAL_SECONDS:
+  fetched_age = time.time() - fetched_at
+  if fallback and not force and 0 <= fetched_age < PROBE_MIN_INTERVAL_SECONDS:
     result["limits"] = fallback
     result["live"] = True
     return result
@@ -1084,7 +1095,8 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
     result["retryAdvised"] = True
   if fallback:
     result["limits"] = fallback
-    result["live"] = time.time() - result["fetchedAtMs"] / 1000 < CURRENT_ENOUGH_SECONDS
+    fetched_age = time.time() - result["fetchedAtMs"] / 1000
+    result["live"] = 0 <= fetched_age < CURRENT_ENOUGH_SECONDS
   else:
     result["usageStatusText"] = "Claude limits unavailable"
     result["authHelpText"] = probe["helpText"]
@@ -1124,7 +1136,7 @@ def registered_accounts() -> list[dict[str, Any]]:
 # know this account is the one with the most room. Each window it last saw
 # comes back at 0%.
 def replenished_limits(cache_name: str) -> list[dict[str, Any]]:
-  cached = read_fresh_json(cache_root() / cache_name, float("inf")) or {}
+  cached = read_json(cache_root() / cache_name) or {}
   entries = cached.get("limits")
   if not isinstance(entries, list):
     return []
