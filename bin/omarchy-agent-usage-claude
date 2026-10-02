@@ -668,16 +668,36 @@ def scan_opencode_usage(max_age_seconds: float) -> dict[str, Any] | None:
     return None
   try:
     conn.execute("PRAGMA query_only = ON")
-    for session_id, raw in conn.execute("SELECT session_id, data FROM message"):
+    tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    # opencode v1 keeps messages in `message`, with the role, provider and model
+    # in each row's data. v2 writes `session_message` instead: the role moves to
+    # the `type` column and the provider and model nest under data.model. A
+    # database can hold either or both.
+    queries = []
+    if "message" in tables:
+      queries.append(("opencode:", "SELECT session_id, data, NULL FROM message"))
+    if "session_message" in tables:
+      queries.append(("opencode-v2:", "SELECT session_id, data, type FROM session_message"))
+    rows = ((prefix, row) for prefix, query in queries for row in conn.execute(query))
+    for session_prefix, (session_id, raw, row_type) in rows:
       # One malformed row must not abort the scan, so every shape assumption
       # lives inside the try.
       try:
         entry = json.loads(raw)
+        if not isinstance(entry, dict):
+          continue
+        if row_type is None:
+          role = entry.get("role")
+          provider = entry.get("providerID")
+          model_id = entry.get("modelID")
+        else:
+          role = row_type
+          model_info = entry.get("model") or {}
+          provider = model_info.get("providerID")
+          model_id = model_info.get("id")
         # Exact match: opencode provider ids are free-form, and a custom
         # "anthropic-proxy" gateway is not this subscription.
-        if not isinstance(entry, dict) or entry.get("role") != "assistant":
-          continue
-        if str(entry.get("providerID") or "") != "anthropic":
+        if role != "assistant" or str(provider or "") != "anthropic":
           continue
         tokens = entry.get("tokens") or {}
         cache = tokens.get("cache") or {}
@@ -692,10 +712,10 @@ def scan_opencode_usage(max_age_seconds: float) -> dict[str, Any] | None:
 
         created = number((entry.get("time") or {}).get("created"))
         day = dt.datetime.fromtimestamp(created / 1000).strftime("%Y-%m-%d") if created > 0 else today
-        model = str(entry.get("modelID") or "claude").rstrip("/").split("/")[-1]
+        model = str(model_id or "claude").rstrip("/").split("/")[-1]
       except Exception:
         continue
-      session_key = "opencode:" + str(session_id)
+      session_key = session_prefix + str(session_id)
       sessions.add(session_key)
       active_days.add(day)
       prompts += 1

@@ -241,10 +241,77 @@ pass "Claude collector counts Anthropic usage, reasoning included, from opencode
   fail "Claude collector ignores prefix-colliding providers, user messages, and malformed rows" "$result"
 pass "Claude collector ignores prefix-colliding providers, user messages, and malformed rows"
 
+# opencode v2 writes session_message instead of message: the role is its own
+# column and the provider and model nest under data.model. An upgraded
+# database keeps its v1 rows, so both tables count.
+OPENCODE_V2_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$STREAM_HOME" "$HISTORY_HOME" "$OPENCODE_HOME" "$OPENCODE_V2_HOME"' EXIT
+
+python3 - "$OPENCODE_V2_HOME/.local/share/opencode/opencode.db" <<'PY'
+import json
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+db = Path(sys.argv[1])
+db.parent.mkdir(parents=True, exist_ok=True)
+conn = sqlite3.connect(db)
+now_ms = int(time.time() * 1000)
+conn.execute("CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)")
+conn.execute("INSERT INTO message VALUES ('msg_1', 'ses_1', ?, ?, ?)", (now_ms, now_ms, json.dumps({
+  "role": "assistant", "providerID": "anthropic", "modelID": "claude-opus-5",
+  "tokens": {"input": 1, "output": 1, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+  "time": {"created": now_ms},
+})))
+conn.execute("""CREATE TABLE session_message (
+  id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+  seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)""")
+
+def v2_message(id, provider, model, type="assistant", input=0, output=0, reasoning=0, read=0, write=0):
+  return (id, "ses_v2", type, 1, now_ms, now_ms, json.dumps({
+    "model": {"id": model, "providerID": provider, "variant": "xhigh"},
+    "tokens": {"input": input, "output": output, "reasoning": reasoning, "cache": {"read": read, "write": write}},
+    "time": {"created": now_ms, "completed": now_ms},
+  }))
+
+conn.executemany("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)", [
+  v2_message("v_1", "anthropic", "claude-opus-5-5", input=4, output=96, reasoning=775, write=50180),
+  v2_message("v_2", "anthropic", "claude-opus-5-5", type="user", input=999),
+  v2_message("v_3", "anthropic-proxy", "claude-opus-5-5", input=999),
+  v2_message("v_4", "openai", "gpt-5.6", input=999),
+])
+conn.execute("INSERT INTO session_message VALUES ('v_5', 'ses_v2', 'assistant', 1, ?, ?, 'not json')", (now_ms, now_ms))
+conn.commit()
+conn.close()
+PY
+
+result=$(HOME="$OPENCODE_V2_HOME" XDG_CACHE_HOME="$OPENCODE_V2_HOME/.cache" XDG_DATA_HOME="$OPENCODE_V2_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --force)
+
+[[ $(jq -r '(.todayTotalTokens|tostring) + "/" + (.todaySessions|tostring)' <<<"$result") == "51057/2" ]] ||
+  fail "Claude collector counts Anthropic usage from opencode v2 sessions" "$result"
+pass "Claude collector counts Anthropic usage from opencode v2 sessions"
+
+[[ $(jq -c '.modelUsage["claude-opus-5-5"]' <<<"$result") == '{"cacheCreationInputTokens":50180,"cacheReadInputTokens":0,"inputTokens":4,"outputTokens":871}' ]] ||
+  fail "Claude collector reads the model from opencode v2's nested model" "$result"
+pass "Claude collector reads the model from opencode v2's nested model"
+
+# A fresh v2 install has no legacy message table at all.
+python3 -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("DROP TABLE message"); c.commit()' \
+  "$OPENCODE_V2_HOME/.local/share/opencode/opencode.db"
+
+result=$(HOME="$OPENCODE_V2_HOME" XDG_CACHE_HOME="$OPENCODE_V2_HOME/.cache" XDG_DATA_HOME="$OPENCODE_V2_HOME/.local/share" \
+  "$ROOT/bin/omarchy-agent-usage-claude" --force)
+
+[[ $(jq -r '(.todayTotalTokens|tostring) + "/" + (.todaySessions|tostring)' <<<"$result") == "51055/1" ]] ||
+  fail "Claude collector counts a v2-only opencode database" "$result"
+pass "Claude collector counts a v2-only opencode database"
+
 # Pi and omp can both spend a Claude subscription without writing native
 # Claude Code transcripts. Their compatible JSONL sessions must be included.
 PI_HOME=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$STREAM_HOME" "$HISTORY_HOME" "$OPENCODE_HOME" "$PI_HOME"' EXIT
+trap 'rm -rf "$TEST_HOME" "$STREAM_HOME" "$HISTORY_HOME" "$OPENCODE_HOME" "$OPENCODE_V2_HOME" "$PI_HOME"' EXIT
 mkdir -p "$PI_HOME/.pi/agent/sessions/project" "$PI_HOME/.omp/agent/sessions/project" \
   "$PI_HOME/.omp/profiles/work/agent/sessions/project"
 
@@ -326,7 +393,7 @@ pass "Claude collector survives concurrent writes to one cache file"
 # Unreadable transcript files are expected when an agent has run as another
 # user, so report one bounded summary rather than one log line per file.
 UNREADABLE_DIR=$(mktemp -d)
-trap 'rm -rf "$TEST_HOME" "$STREAM_HOME" "$HISTORY_HOME" "$OPENCODE_HOME" "$PI_HOME" "$UNREADABLE_DIR"' EXIT
+trap 'rm -rf "$TEST_HOME" "$STREAM_HOME" "$HISTORY_HOME" "$OPENCODE_HOME" "$OPENCODE_V2_HOME" "$PI_HOME" "$UNREADABLE_DIR"' EXIT
 mkdir -p "$UNREADABLE_DIR/project"
 touch "$UNREADABLE_DIR/project/unreadable-1.jsonl" \
   "$UNREADABLE_DIR/project/unreadable-2.jsonl" \
