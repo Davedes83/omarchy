@@ -1150,3 +1150,110 @@ result=$(HOME="$PREFILTER_HOME" CODEX_HOME="$PREFILTER_HOME/.codex" XDG_CACHE_HO
 [[ $(jq -c '.modelUsage["o3-mini"]' <<<"$result") == '{"inputTokens":20,"outputTokens":5,"cacheReadInputTokens":10,"cacheCreationInputTokens":0}' ]] ||
   fail "Codex collector splits cached and input tokens correctly for o3-mini" "$result"
 pass "Codex collector prefilters session lines and tracks model context"
+
+# Session history only grows, so a refresh must read the files that changed
+# and replay the totals it already has for the rest. Several GB of history
+# otherwise goes through the JSONL parser on every widget refresh.
+INCREMENTAL_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME" "$PROVIDER_HOME" "$PREFILTER_HOME" "$INCREMENTAL_HOME"' EXIT
+mkdir -p "$INCREMENTAL_HOME/bin" "$INCREMENTAL_HOME/.codex/sessions/$(date +%Y/%m/%d)" "$INCREMENTAL_HOME/.pi/agent/sessions"
+cp "$TEST_HOME/bin/codex" "$INCREMENTAL_HOME/bin/codex"
+
+incremental_timestamp="$(date +%Y-%m-%d)T09:00:00Z"
+incremental_session="$INCREMENTAL_HOME/.codex/sessions/$(date +%Y/%m/%d)/rollout.jsonl"
+cat >"$incremental_session" <<EOF
+{"timestamp":"$incremental_timestamp","type":"turn_context","payload":{"model":"gpt-test"}}
+{"timestamp":"$incremental_timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5}}}}
+EOF
+
+incremental_pi="$INCREMENTAL_HOME/.pi/agent/sessions/session.jsonl"
+cat >"$incremental_pi" <<EOF
+{"type":"message","id":"m1","timestamp":"$incremental_timestamp","message":{"role":"assistant","provider":"openai-codex","model":"gpt-test","usage":{"input":4,"output":1}}}
+EOF
+
+run_incremental() {
+  HOME="$INCREMENTAL_HOME" CODEX_HOME="$INCREMENTAL_HOME/.codex" XDG_CACHE_HOME="$INCREMENTAL_HOME/.cache" \
+    XDG_DATA_HOME="$INCREMENTAL_HOME/.local/share" PATH="$INCREMENTAL_HOME/bin:$PATH" \
+    "$ROOT/bin/omarchy-agent-usage-codex" "$@"
+}
+
+# The aggregate scan cache would answer the next run on its own, and it is the
+# rescan underneath that this covers.
+expire_scan_cache() {
+  local cache
+  for cache in "$INCREMENTAL_HOME/.cache/omarchy/agent-usage/"codex-scan-*.json; do
+    [[ -e $cache ]] && touch -d "2 hours ago" "$cache"
+  done
+}
+
+result=$(run_incremental)
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "20" ]] ||
+  fail "Codex collector counts both session sources on a first scan" "$result"
+
+file_cache=$(ls "$INCREMENTAL_HOME/.cache/omarchy/agent-usage/"codex-files-*.json 2>/dev/null | head -n 1)
+[[ -n $file_cache && -s $file_cache ]] ||
+  fail "Codex collector writes a per-file cache on first scan"
+[[ $(jq --arg path "$incremental_session" -r '.files[$path].days | length' "$file_cache") == "1" ]] ||
+  fail "Codex collector records the native session file it read" "$(cat "$file_cache")"
+# A forked pi session repeats its parent's messages, so pi sessions are only
+# deduplicated across the whole tree at once, never replayed per file.
+[[ $(jq --arg path "$incremental_pi" -r '.files | has($path)' "$file_cache") == "false" ]] ||
+  fail "Codex collector keeps pi sessions out of the per-file cache" "$(cat "$file_cache")"
+pass "Codex collector records per-file totals as it scans"
+
+# Unreadable, but unchanged in mtime and size: a run that still reports the
+# same totals can only have replayed them.
+chmod 000 "$incremental_session"
+expire_scan_cache
+result=$(run_incremental)
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "20" ]] ||
+  fail "Codex collector rereads session files it has already counted" "$result"
+pass "Codex collector replays unchanged session files instead of rereading them"
+
+# --force means the history itself is re-read, per-file records included.
+result=$(run_incremental --force)
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "5" ]] ||
+  fail "Codex collector --force reuses per-file records" "$result"
+pass "Codex collector --force rereads the history"
+
+chmod 644 "$incremental_session"
+# The --force run above could not read the session, so cache it again first,
+# or the append below is read from scratch whether or not the cache noticed it.
+expire_scan_cache
+run_incremental >/dev/null
+cat >>"$incremental_session" <<EOF
+{"timestamp":"$incremental_timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":10,"output_tokens":2}}}}
+EOF
+expire_scan_cache
+result=$(run_incremental)
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "52" ]] ||
+  fail "Codex collector misses turns appended to a session it had cached" "$result"
+pass "Codex collector rereads a session file that grew"
+
+# Records are bucketed by local day, so a new timezone has to re-read them.
+zone_timestamp="$(date -u +%Y-%m-%d)T02:00:00Z"
+zone_session="$INCREMENTAL_HOME/.codex/sessions/zone.jsonl"
+cat >"$zone_session" <<EOF
+{"timestamp":"$zone_timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":3,"output_tokens":1}}}}
+EOF
+expire_scan_cache
+TZ=UTC run_incremental >/dev/null
+expire_scan_cache
+TZ=America/Los_Angeles run_incremental >/dev/null
+file_cache=$(ls "$INCREMENTAL_HOME/.cache/omarchy/agent-usage/"codex-files-*.json | head -n 1)
+[[ $(jq --arg path "$zone_session" -r '.files[$path].days | keys[0]' "$file_cache") == "$(TZ=America/Los_Angeles date -d "$zone_timestamp" +%Y-%m-%d)" ]] ||
+  fail "Codex collector keeps the old timezone's days after a timezone change" "$(cat "$file_cache")"
+pass "Codex collector re-reads per-file records after a timezone change"
+
+# A line that stops the read keeps the usage read before it, as it always has.
+broken_session="$INCREMENTAL_HOME/.codex/sessions/broken.jsonl"
+cat >"$broken_session" <<EOF
+{"timestamp":"$incremental_timestamp","type":"turn_context","payload":{"model":"gpt-broken"}}
+{"timestamp":"$incremental_timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":6,"output_tokens":0}}}}
+null
+EOF
+expire_scan_cache
+result=$(run_incremental)
+[[ $(jq -r '.modelUsage["gpt-broken"].inputTokens' <<<"$result") == "6" ]] ||
+  fail "Codex collector drops usage read before a line that stops the read" "$result"
+pass "Codex collector keeps usage read before a line that stops the read"
