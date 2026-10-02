@@ -39,7 +39,7 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 collector = importlib.util.module_from_spec(spec)
 loader.exec_module(collector)
 
-print(collector.oauth_login(pathlib.Path(os.environ["CLAUDE_DIR"]))[2])
+print(collector.oauth_login(pathlib.Path(os.environ["CLAUDE_DIR"]))[-1])
 PY
   )
 
@@ -110,7 +110,7 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 collector = importlib.util.module_from_spec(spec)
 loader.exec_module(collector)
 
-print(collector.oauth_login(pathlib.Path(os.environ["CLAUDE_DIR"]))[2])
+print(collector.oauth_login(pathlib.Path(os.environ["CLAUDE_DIR"]))[-1])
 PY
 )
 [[ $plan == "Max 5x" ]] ||

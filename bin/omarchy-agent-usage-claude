@@ -754,14 +754,14 @@ def merge_stats(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
 # CLI's login. Nothing else leaves the credential store: the token goes
 # nowhere but the Authorization header of the limits probe, and only the
 # plan label may travel into the printed record.
-def oauth_login(claude_dir: Path) -> tuple[str, int, str]:
+def oauth_login(claude_dir: Path) -> tuple[str, int, int, str]:
   try:
     data = json.loads((claude_dir / ".credentials.json").read_text(encoding="utf-8"))
   except Exception:
-    return "", 0, ""
+    return "", 0, 0, ""
   login = data.get("claudeAiOauth")
   if not isinstance(login, dict):
-    return "", 0, ""
+    return "", 0, 0, ""
   # The profile's tier is asked first, but only one that names a multiplier
   # outranks the credentials'. The subscription still leads the label, so a
   # Team seat keeps reading Team.
@@ -769,7 +769,12 @@ def oauth_login(claude_dir: Path) -> tuple[str, int, str]:
   if not re.search(r"max_(\d+x)", tier, re.IGNORECASE):
     tier = str(login.get("rateLimitTier") or "")
   plan = plan_label(tier, str(login.get("subscriptionType") or ""))
-  return str(login.get("accessToken") or ""), number(login.get("expiresAt")), plan
+  return (
+    str(login.get("accessToken") or ""),
+    number(login.get("expiresAt")),
+    number(login.get("refreshTokenExpiresAt")),
+    plan,
+  )
 
 
 # The credentials carry the tier their token was minted with, and an upgrade
@@ -1006,7 +1011,7 @@ def usable_cached_limits(cached: dict[str, Any]) -> list[dict[str, Any]]:
   return [entry for entry in entries if isinstance(entry, dict) and limit_window_open(entry, now)]
 
 
-def collect_limits(access_token: str, expires_at_ms: int, force: bool, cache_name: str = "claude-limits.json") -> dict[str, Any]:
+def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms: int, force: bool, cache_name: str = "claude-limits.json") -> dict[str, Any]:
   # `live` says the numbers came from Anthropic just now (or within the reuse
   # window) rather than from a cache kept past a failed or impossible probe.
   result = {"limits": [], "usageStatusText": "", "authHelpText": AUTH_HELP, "live": False}
@@ -1035,6 +1040,19 @@ def collect_limits(access_token: str, expires_at_ms: int, force: bool, cache_nam
     return result
   if expires_at_ms > 0 and expires_at_ms <= time.time() * 1000:
     result["limits"] = fallback
+    # A lapsed access token is routine, not a sign-out: it lives about eight
+    # hours, and the CLI mints a new one from the refresh token the next time
+    # it runs. Only a lapsed *refresh* token is a sign-in a person must redo,
+    # and saying so either way sends people to `claude auth login` nightly --
+    # which does not restore anything the CLI would not have restored itself.
+    if refresh_expires_at_ms > time.time() * 1000:
+      result["usageStatusText"] = "Limits paused"
+      result["authHelpText"] = (
+        "Claude Code's access token has lapsed"
+        + (" — showing the last known limits." if fallback else ".")
+        + " Start Claude Code to refresh it; signing in again is not needed."
+      )
+      return result
     result["usageStatusText"] = "Sign-in expired"
     result["authHelpText"] = (
       "Claude Code's saved sign-in expired"
@@ -1128,7 +1146,7 @@ def current_account_id(home: Path) -> str:
 
 def account_limits(account: dict[str, Any], force: bool) -> dict[str, Any]:
   home = expand_path(account["home"]) if account.get("home") else expand_path("~/.claude")
-  access_token, expires_at_ms, plan = oauth_login(home)
+  access_token, expires_at_ms, refresh_expires_at_ms, plan = oauth_login(home)
   # Keyed by the subscription, not the label: forget "Work" and add a different
   # "Work", and the new one must never fall back on the old one's allowance.
   # Who the home is signed in as now, not when it was added: a `claude auth
@@ -1142,7 +1160,7 @@ def account_limits(account: dict[str, Any], force: bool) -> dict[str, Any]:
     cache_name = "claude-limits.json"
   else:
     cache_name = f"claude-limits-{key}.json"
-  limits = collect_limits(access_token, expires_at_ms, force, cache_name)
+  limits = collect_limits(access_token, expires_at_ms, refresh_expires_at_ms, force, cache_name)
   if not limits["live"] and not limits["limits"]:
     limits["limits"] = replenished_limits(cache_name)
   return {
@@ -1204,8 +1222,8 @@ def main() -> int:
     limits = {key: current[key] for key in ("limits", "usageStatusText", "authHelpText", "retryAdvised")}
     stale, fetched_at = current["stale"], current["fetchedAt"]
   else:
-    access_token, expires_at_ms, plan = oauth_login(claude_dir)
-    limits = collect_limits(access_token, expires_at_ms, args.force)
+    access_token, expires_at_ms, refresh_expires_at_ms, plan = oauth_login(claude_dir)
+    limits = collect_limits(access_token, expires_at_ms, refresh_expires_at_ms, args.force)
     stale, fetched_at = not limits["live"], limits["fetchedAtMs"]
 
   record = {
