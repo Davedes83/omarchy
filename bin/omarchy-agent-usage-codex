@@ -437,6 +437,11 @@ def scan_native_codex_sessions():
     try:
       with path.open(errors="replace") as handle:
         for raw in handle:
+          # Cheap pre-filter before JSON parsing keeps files with unrelated
+          # lines inexpensive. session_meta still has to get through: it says
+          # which provider served the rollout.
+          if '"token_count"' not in raw and '"turn_context"' not in raw and '"session_meta"' not in raw:
+            continue
           try:
             entry = json.loads(raw)
           except Exception:

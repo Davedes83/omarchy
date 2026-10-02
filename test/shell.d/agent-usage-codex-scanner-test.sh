@@ -1118,3 +1118,35 @@ result=$(HOME="$PROVIDER_HOME" CODEX_HOME="$PROVIDER_HOME/.codex" XDG_CACHE_HOME
 [[ $(jq -r '.todaySessions' <<<"$result") == "3" ]] ||
   fail "Codex collector excludes foreign-provider rollouts from the session count" "$result"
 pass "Codex collector ignores native sessions served by a non-OpenAI provider"
+
+# Codex native session scan skips lines without token_count or turn_context before JSON parsing
+PREFILTER_HOME=$(mktemp -d)
+trap 'rm -rf "$TEST_HOME" "$PI_HOME" "$GIT_HOME" "$OPENCODE_HOME" "$CACHE_HOME" "$FRESH_HOME" "$MALFORMED_HOME" "$UNWRITABLE_HOME" "$INTERRUPTED_HOME" "$BATCHED_HOME" "$LAUNCH_HOME" "$LINK_HOME" "$SHIM_HOME" "$NOAUTH_HOME" "$KEYRING_HOME" "$TOKEN_HOME" "$APIKEY_HOME" "$EXIT_HOME" "$DEAD_HOME" "$HALF_HOME" "$SILENT_HOME" "$STALL_HOME" "$NOISY_HOME" "$CHATTY_HOME" "$PROVIDER_HOME" "$PREFILTER_HOME"' EXIT
+mkdir -p "$PREFILTER_HOME/bin" "$PREFILTER_HOME/.codex/sessions/$(date +%Y/%m/%d)"
+cp "$TEST_HOME/bin/codex" "$PREFILTER_HOME/bin/codex"
+
+session="$PREFILTER_HOME/.codex/sessions/$(date +%Y/%m/%d)/session.jsonl"
+cat >"$session" <<EOF
+{"timestamp":"$timestamp","type":"session_meta","payload":{"id":"session-123"}}
+this is plain non-json text that should be skipped by the prefilter
+{"timestamp":"$timestamp","type":"turn_context","payload":{"model":"gpt-4o"}}
+{"timestamp":"$timestamp","type":"user_message","payload":{"content":"Write a sorting algorithm"}}
+{"timestamp":"$timestamp","type":"agent_reasoning","payload":{"content":"Thinking about quicksort..."}}
+{"timestamp":"$timestamp","type":"response_item","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":20,"output_tokens":15,"total_tokens":65}}}}
+{"timestamp":"$timestamp","type":"agent_message","payload":{"content":"Here is quicksort..."}}
+{"timestamp":"$timestamp","type":"turn_context","payload":{"model":"o3-mini"}}
+{"timestamp":"$timestamp","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":10,"output_tokens":5,"total_tokens":35}}}}
+EOF
+
+result=$(HOME="$PREFILTER_HOME" CODEX_HOME="$PREFILTER_HOME/.codex" XDG_CACHE_HOME="$PREFILTER_HOME/.cache" XDG_DATA_HOME="$PREFILTER_HOME/.local/share" \
+  PATH="$PREFILTER_HOME/bin:$PATH" "$ROOT/bin/omarchy-agent-usage-codex" --force)
+
+[[ $(jq -r '.todayTotalTokens' <<<"$result") == "100" ]] ||
+  fail "Codex collector computes total tokens across models with prefilter" "$result"
+[[ $(jq -c '.todayTokensByModel' <<<"$result") == '{"gpt-4o":65,"o3-mini":35}' ]] ||
+  fail "Codex collector attributes tokens by model when switching models via turn_context" "$result"
+[[ $(jq -c '.modelUsage["gpt-4o"]' <<<"$result") == '{"inputTokens":30,"outputTokens":15,"cacheReadInputTokens":20,"cacheCreationInputTokens":0}' ]] ||
+  fail "Codex collector splits cached and input tokens correctly for gpt-4o" "$result"
+[[ $(jq -c '.modelUsage["o3-mini"]' <<<"$result") == '{"inputTokens":20,"outputTokens":5,"cacheReadInputTokens":10,"cacheCreationInputTokens":0}' ]] ||
+  fail "Codex collector splits cached and input tokens correctly for o3-mini" "$result"
+pass "Codex collector prefilters session lines and tracks model context"
