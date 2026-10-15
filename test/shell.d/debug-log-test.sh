@@ -190,6 +190,42 @@ grep -q 'https://logs.omarchy.org/stub' <<<"$upload_out" ||
   fail "omarchy upload-log still uploads and reports the URL" "$upload_out"
 pass "omarchy upload-log still uploads and reports the URL"
 
+# --- omarchy-debug, when the rename is refused --------------------------
+# /tmp is sticky, so mv into an existing name owned by another uid fails with
+# EPERM. Creating such a file needs a second uid, so stub mv to refuse once:
+# the command must still produce a log and exit 0.
+rm -f "$log"
+cat >"$tmp/bin/mv" <<'EOF'
+#!/bin/bash
+if [[ $1 == -fT ]]; then
+  echo "mv: cannot overwrite: Operation not permitted" >&2
+  exit 1
+fi
+exec /usr/bin/mv "$@"
+EOF
+chmod +x "$tmp/bin/mv"
+
+refused_status=0
+MKTEMP_MANIFEST="$manifest" PATH="$tmp/bin:$ROOT/bin:$PATH" \
+  "$ROOT/bin/omarchy-debug" --no-sudo --print >"$tmp/refused.out" 2>"$tmp/refused.err" ||
+  refused_status=$?
+
+rm -f "$tmp/bin/mv"
+
+[[ $refused_status == 0 ]] ||
+  fail "omarchy debug still succeeds when the rename is refused" "exit: $refused_status"
+pass "omarchy debug still succeeds when the rename is refused"
+
+fallback=$(sed -n 's|^Note: \(.*\) is used instead of .*$|\1|p' "$tmp/refused.err")
+[[ -n $fallback ]] ||
+  fail "omarchy debug says where the log went instead" "$(cat "$tmp/refused.err")"
+grep -q 'SYSTEM INFORMATION' "$fallback" ||
+  fail "the fallback log carries the diagnostics" "$(head -5 "$fallback")"
+pass "omarchy debug says where the log went instead"
+# The fallback deliberately survives -- it is the log now, not a leftover -- so
+# remove it here for the assertion below, which would otherwise read it as one.
+rm -f -- "$fallback"
+
 # Nothing either helper staged may outlive it. The manifest is the exact list of
 # files the scripts created, so this needs no scan of /tmp.
 [[ -s $manifest ]] || fail "the helpers stage their logs in a temporary file"

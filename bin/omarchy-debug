@@ -73,7 +73,15 @@ INSTALLED PACKAGES
 $({ expac -S '%n %v (%r)' $(pacman -Qqe) 2>/dev/null; comm -13 <(pacman -Sql | sort) <(pacman -Qqe | sort) | xargs -r expac -Q '%n %v (AUR)'; } | sort)
 EOF
 
-mv -fT "$STAGED_LOG" "$LOG_FILE" || exit 1
+# /tmp is sticky, so the rename fails with EPERM when the published name is already
+# owned by another uid -- a stale log from a different account on a shared machine.
+# Fall back to the staged file rather than exiting with no log at all, which is
+# worse than what this script did before the staging change.
+if ! mv -fT "$STAGED_LOG" "$LOG_FILE" 2>/dev/null; then
+  LOG_FILE=$STAGED_LOG
+  trap - EXIT
+  echo "Note: $LOG_FILE is used instead of /tmp/omarchy-debug.log" >&2
+fi
 
 if [[ $PRINT_ONLY = "true" ]]; then
   cat "$LOG_FILE"
